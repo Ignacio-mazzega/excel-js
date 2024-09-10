@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Excel</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue",
+          sans-serif;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      img {
+        max-width: 20px;
+        height: auto;
+      }
+
+      table {
+        border-collapse: collapse;
+      }
+
+      thead,
+      tr td:first-child {
+        background-color: #eee;
+      }
+
+      th,
+      td {
+        border: 1px solid #ccc;
+        font-weight: normal;
+        font-size: 12px;
+        text-align: center;
+        width: 64px;
+        height: 20px;
+        vertical-align: middle;
+        position: relative;
+      }
+
+      span,
+      input {
+        position: absolute;
+        inset: 0;
+        vertical-align: middle;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        border-radius: 2px;
+
+        &:focus {
+          opacity: 1;
+          outline: 2px solid #09f;
+        }
+      }
+
+      input {
+        border: 0;
+        opacity: 0;
+        pointer-events: none;
+        width: 100%;
+      }
+
+      .selected {
+        background: rgb(174, 223, 255);
+      }
+
+      th.selected {
+        background: rgb(146, 211, 255);
+      }
+    </style>
+    <script type="module">
+      const $ = (el) => document.querySelector(el);
+      const $$ = (el) => document.querySelectorAll(el);
+
+      const $table = $("table");
+      const $head = $("thead");
+      const $body = $("tbody");
+
+      const ROWS = 10;
+      const COLUMS = 5;
+      const FIRST_CHAR_CODE = 65;
+
+      const times = (length) => Array.from({ length }, (_, i) => i);
+      const getColumn = (i) => String.fromCharCode(FIRST_CHAR_CODE + i);
+
+      let selectedColumn = null;
+
+      let STATE = times(COLUMS).map((i) =>
+        times(ROWS).map((j) => ({ computedValue: 0, value: 0 }))
+      );
+
+      function updateCell({ x, y, value }) {
+        const newState = structuredClone(STATE);
+        const constants = generateCellsConstants(newState);
+
+        const cell = newState[x][y];
+
+        cell.computedValue = computeValue(value, constants); // span
+        cell.value = value; // input
+
+        newState[x][y] = cell;
+
+        computeAllCells(newState, generateCellsConstants(newState));
+
+        STATE = newState;
+
+        renderSpreadSheet();
+      }
+
+      function generateCellsConstants(cells) {
+        return cells
+          .map((rows, x) => {
+            return rows
+              .map((cell, y) => {
+                const letter = getColumn(x); // --> A
+                const cellId = `${letter}${y + 1}`; // --> A1
+                return `const ${cellId} = ${cell.computedValue};`;
+              })
+              .join("\n");
+          })
+          .join("\n");
+      }
+
+      function computeAllCells(cells, constants) {
+        cells.forEach((rows, x) => {
+          rows.forEach((cell, y) => {
+            const computedValue = computeValue(cell.value, constants);
+            cell.computedValue = computedValue;
+          });
+        });
+      }
+
+      function computeValue(value, constants) {
+        if (typeof value === "number") return value;
+        if (!value.startsWith("=")) return value;
+
+        const formula = value.slice(1);
+
+        let computedValue;
+        try {
+          computedValue = eval(`(() => {
+          ${constants};
+          return ${formula};
+        })()`);
+        } catch (e) {
+          computedValue = `!ERROR: ${e.message}`;
+        }
+
+        return computedValue;
+      }
+
+      const renderSpreadSheet = () => {
+        const headerHTML = `<tr> 
+              <th></th>
+              ${times(COLUMS)
+                .map((i) => `<th>${getColumn(i)}</th>`)
+                .join("")}  
+                </tr>`;
+        $head.innerHTML = headerHTML;
+
+        const bodyHTML = times(ROWS)
+          .map((row) => {
+            return `<tr>
+            <td>${row + 1}</td>
+            ${times(COLUMS)
+              .map(
+                (column) => `
+            <td data-x="${column}" data-y="${row}"> 
+             <span>${STATE[column][row].computedValue}</span>
+             <input type="text" value="${STATE[column][row].value}" />  
+                </td>`
+              )
+              .join("")}
+            </tr>`;
+          })
+          .join("");
+        $body.innerHTML = bodyHTML;
+      };
+
+      $body.addEventListener("click", (event) => {
+        const td = event.target.closest("td");
+        if (!td) return;
+
+        const { x, y } = td.dataset;
+        const input = td.querySelector("input");
+        const span = td.querySelector("span");
+
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+        input.focus();
+
+        $$(".selected").forEach((el) => el.classList.remove("selected"));
+        selectedColumn = null;
+
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") input.blur();
+        });
+
+        input.addEventListener(
+          "blur",
+          () => {
+            if (input.value === STATE[x][y].value) return;
+
+            updateCell({ x, y, value: input.value });
+          },
+          { once: true }
+        );
+      });
+
+      $head.addEventListener("click", (event) => {
+        const th = event.target.closest("th");
+        if (!th) return;
+
+        const x = [...th.parentNode.children].indexOf(th);
+        if (x <= 0) return;
+
+        selectedColumn = x - 1;
+
+        $$(".selected").forEach((el) => el.classList.remove("selected"));
+        th.classList.add("selected");
+        $$(`tr td:nth-child(${x + 1})`).forEach((el) =>
+          el.classList.add("selected")
+        );
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Backspace" && selectedColumn !== null) {
+          times(ROWS).forEach((row) => {
+            updateCell({ x: selectedColumn, y: row, value: "" });
+          });
+          renderSpreadSheet();
+        }
+      });
+
+      document.addEventListener("copy", (event) => {
+        if (selectedColumn !== null) {
+          const columnValues = times(ROWS).map((row) => {
+            return STATE[selectedColumn][row].computedValue;
+          });
+
+          event.clipboardData.setData("text/plain", columnValues.join("\n"));
+          event.preventDefault();
+        }
+      });
+
+      document.addEventListener("click", (event) => {
+        const { target } = event;
+
+        const isThClicked = target.closest("th");
+        const isTdClicked = target.closest("td");
+
+        if (!isTdClicked && !isThClicked) {
+          $$(".selected").forEach((el) => el.classList.remove("selected"));
+          selectedColumn = null;
+        }
+      });
+
+      renderSpreadSheet();
+    </script>
+  </head>
+  <body>
+    <img
+      src="data:image/png;base64,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"
+      alt=""
+    />
+
+    <table>
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </body>
+</html>
